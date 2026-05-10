@@ -59,6 +59,19 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
+Quick restart on server:
+
+```bash
+chmod +x restart.sh
+./restart.sh
+```
+
+Optional auto-pull + restart:
+
+```bash
+AUTO_PULL=1 ./restart.sh
+```
+
 After setup:
 
 - Open `http://localhost`

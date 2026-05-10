@@ -1,8 +1,10 @@
 import json
+import logging
 import os
 import math
 import re
 import shutil
+import time
 from io import BytesIO
 import uuid
 from datetime import datetime, timezone
@@ -11,7 +13,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -48,6 +50,7 @@ mongo_client = None
 mongo_db = None
 mongo_jobs = None
 mongo_files = None
+logger = logging.getLogger(__name__)
 
 
 app = FastAPI(title="PDF to Excel OCR", version="1.0.0")
@@ -347,6 +350,7 @@ def process_uploaded_pdfs(
             raise HTTPException(status_code=400, detail="Only .pdf files are allowed.")
 
     job_id = uuid.uuid4().hex[:12]
+    job_started = time.time()
     job_dir = JOB_ROOT / job_id
     pdf_dir = job_dir / "pdfs"
     raw_dir = job_dir / "raw_text"
@@ -372,12 +376,19 @@ def process_uploaded_pdfs(
     run_batch.configure_tesseract()
     run_batch.configure_tessdata_prefix()
     ocr_lang = run_batch.resolve_ocr_lang(lang)
+    print(
+        f"[job {job_id}] started files={len(saved_files)} "
+        f"lang={ocr_lang} accuracy={accuracy_mode} dpi={dpi} max_pages={max_pages}"
+    )
 
     all_records: List[Dict] = []
     per_file: List[Dict] = []
 
-    for pdf in saved_files:
+    for file_idx, pdf in enumerate(saved_files, start=1):
+        file_started = time.time()
+        print(f"[job {job_id}] file {file_idx}/{len(saved_files)} start: {pdf.name}")
         images = run_batch.pdf_to_images(pdf, dpi=dpi, max_pages=max_pages)
+        print(f"[job {job_id}] file {file_idx}/{len(saved_files)} pages={len(images)}")
         text = run_batch.extract_text(images, ocr_lang=ocr_lang, accuracy_mode=accuracy_mode)
 
         raw_file = raw_dir / f"{pdf.stem}.txt"
@@ -386,6 +397,11 @@ def process_uploaded_pdfs(
         constants = run_batch.extract_constants(text, source_file=pdf.name)
         records = run_batch.parse_voter_data(text, source_file=pdf.name, constants=constants)
         all_records.extend(records)
+        file_elapsed = time.time() - file_started
+        print(
+            f"[job {job_id}] file {file_idx}/{len(saved_files)} done "
+            f"records={len(records)} elapsed={file_elapsed:.1f}s"
+        )
         per_file.append(
             {
                 "file_name": pdf.name,
@@ -395,6 +411,7 @@ def process_uploaded_pdfs(
         )
 
     excel_path = job_dir / "all_voters.xlsx"
+    print(f"[job {job_id}] writing outputs excel/csv ...")
     run_batch.save_excel(all_records, excel_path)
     run_batch.save_csv_files(all_records, csv_dir)
     marathi_csv_path = csv_dir / "all_voters_marathi.csv"
@@ -444,6 +461,11 @@ def process_uploaded_pdfs(
         marathi_csv_path=marathi_csv_path,
         english_csv_path=english_csv_path,
     )
+    job_elapsed = time.time() - job_started
+    print(
+        f"[job {job_id}] completed total_records={len(all_records)} "
+        f"elapsed={job_elapsed:.1f}s"
+    )
     return payload
 
 
@@ -454,6 +476,15 @@ def on_startup() -> None:
     run_batch.configure_tesseract()
     run_batch.configure_tessdata_prefix()
     init_mongo()
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled server error path=%s", request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error. Please check server logs and retry."},
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)

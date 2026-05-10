@@ -1,12 +1,16 @@
 :root {
   color-scheme: light;
-  --bg: #f5f7fb;
-  --panel: #ffffff;
-  --text: #141926;
-  --muted: #54617a;
-  --line: #d9dfec;
-  --accent: #1862f0;
+  --bg: #f4f7fc;
+  --surface: #ffffff;
+  --surface-alt: #f8faff;
+  --text: #111827;
+  --muted: #5a667d;
+  --line: #dbe3f1;
+  --line-strong: #c5d2ea;
+  --accent: #245ad8;
   --accent-soft: #e9f0ff;
+  --success: #0f8f56;
+  --error: #b42318;
 }
 
 * {
@@ -21,14 +25,14 @@ body {
 }
 
 .layout {
-  width: min(1200px, 96vw);
-  margin: 24px auto 40px;
+  width: min(1240px, 96vw);
+  margin: 22px auto 38px;
   display: grid;
   gap: 16px;
 }
 
 .panel {
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 16px;
@@ -45,6 +49,19 @@ body {
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 14px;
+  line-height: 1.4;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.signed-in {
+  font-size: 13px;
+  color: var(--muted);
 }
 
 .form {
@@ -54,13 +71,19 @@ body {
 }
 
 .dropzone {
-  border: 1px dashed #b5c0d7;
-  background: #f8faff;
+  border: 1px dashed var(--line-strong);
+  background: var(--surface-alt);
   border-radius: 8px;
   padding: 18px;
   cursor: pointer;
   display: grid;
   gap: 6px;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.dropzone:hover {
+  border-color: #9db5e7;
+  background: #f3f7ff;
 }
 
 .dropzone input[type="file"] {
@@ -75,11 +98,12 @@ body {
 .dropzone-subtitle {
   font-size: 13px;
   color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  grid-template-columns: repeat(4, minmax(165px, 1fr));
   gap: 12px;
 }
 
@@ -98,12 +122,22 @@ input[type="number"],
 input[type="text"],
 input[type="password"] {
   width: 100%;
-  height: 38px;
+  height: 40px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--text);
-  padding: 0 10px;
+  padding: 0 11px;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+select:focus,
+input[type="number"]:focus,
+input[type="text"]:focus,
+input[type="password"]:focus {
+  border-color: #8ea8dc;
+  box-shadow: 0 0 0 3px rgba(36, 90, 216, 0.08);
 }
 
 button,
@@ -120,25 +154,32 @@ button,
   align-items: center;
   justify-content: center;
   padding: 0 14px;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+button:hover,
+.btn-link:hover {
+  border-color: var(--line-strong);
+  background: #f7f9fe;
+}
+
+button:disabled,
+.btn-link:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
 }
 
 #submit-btn {
+  min-width: 168px;
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
-  width: 160px;
+  font-weight: 600;
 }
 
-.topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.signed-in {
-  font-size: 13px;
-  color: var(--muted);
+#submit-btn:hover {
+  background: #1f4ebe;
+  border-color: #1f4ebe;
 }
 
 .logout-btn {
@@ -146,10 +187,80 @@ button,
   font-size: 13px;
 }
 
+.action-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.inline-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.progress-wrap {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px 12px;
+  background: #fbfdff;
+}
+
+.progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 13px;
+}
+
+#progress-stage {
+  color: var(--muted);
+}
+
+#progress-percent {
+  font-weight: 600;
+}
+
+.progress-track {
+  width: 100%;
+  height: 10px;
+  background: #e8eef9;
+  border-radius: 999px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #245ad8, #3d8dff);
+  background-size: 32px 32px;
+  transition: width 0.45s ease;
+  animation: progressStripe 1.2s linear infinite;
+}
+
+.progress-wrap.complete .progress-fill {
+  background: linear-gradient(90deg, #0e9e5d, #12b76a);
+  animation: none;
+}
+
+.progress-wrap.error .progress-fill {
+  background: linear-gradient(90deg, #c43226, #e35044);
+  animation: none;
+}
+
 .status {
   margin: 0;
   font-size: 13px;
   color: var(--muted);
+}
+
+.status-error {
+  color: var(--error);
 }
 
 .hidden {
@@ -165,8 +276,9 @@ button,
 
 .btn-link {
   background: var(--accent-soft);
-  border-color: #c5d8ff;
-  color: #1d4db8;
+  border-color: #cad9fc;
+  color: #1c4eb9;
+  font-weight: 500;
 }
 
 .tabs {
@@ -191,17 +303,17 @@ button,
 table {
   border-collapse: collapse;
   width: 100%;
-  min-width: 900px;
+  min-width: 920px;
   font-size: 13px;
 }
 
 thead {
-  background: #f6f8fd;
+  background: #f3f7ff;
 }
 
 th,
 td {
-  border-bottom: 1px solid #e8ecf5;
+  border-bottom: 1px solid #e7ecf7;
   text-align: left;
   padding: 8px 10px;
   vertical-align: top;
@@ -235,17 +347,26 @@ tbody tr:nth-child(even) {
 
 .error-text {
   margin: 12px 0 0;
-  color: #b42318;
+  color: var(--error);
   font-size: 13px;
+}
+
+@keyframes progressStripe {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 32px 0;
+  }
 }
 
 @media (max-width: 1024px) {
   .grid {
-    grid-template-columns: repeat(2, minmax(160px, 1fr));
+    grid-template-columns: repeat(2, minmax(165px, 1fr));
   }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 640px) {
   .layout {
     width: 100%;
     margin: 0;
@@ -258,5 +379,9 @@ tbody tr:nth-child(even) {
 
   #submit-btn {
     width: 100%;
+  }
+
+  .action-row {
+    align-items: stretch;
   }
 }
