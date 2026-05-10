@@ -23,7 +23,9 @@ services:
       mongo:
         condition: service_healthy
     ports:
-      - "8082:8082"
+      - "127.0.0.1:8082:8082"
+    expose:
+      - "8082"
     environment:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: pdf2excel
@@ -33,6 +35,31 @@ services:
     volumes:
       - ./output:/app/output
       - ./pdfs:/app/pdfs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=5).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: pdf2excel-nginx
+    depends_on:
+      pdf2excel-web:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx/runtime:/etc/nginx/conf.d:ro
+      - ./certbot/www:/var/www/certbot:ro
+      - ./certbot/conf:/etc/letsencrypt:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
     restart: unless-stopped
 
 volumes:

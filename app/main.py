@@ -93,6 +93,24 @@ def template_ctx(request: Request, extra: Optional[Dict] = None) -> Dict:
     return data
 
 
+def render_template_response(
+    request: Request,
+    name: str,
+    extra: Optional[Dict] = None,
+    status_code: int = 200,
+):
+    context = template_ctx(request, extra)
+    try:
+        return templates.TemplateResponse(
+            request=request,
+            name=name,
+            context=context,
+            status_code=status_code,
+        )
+    except TypeError:
+        return templates.TemplateResponse(name, context, status_code=status_code)
+
+
 def mongo_enabled() -> bool:
     return mongo_jobs is not None and mongo_files is not None and Binary is not None
 
@@ -442,11 +460,7 @@ def on_startup() -> None:
 def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse(
-        request=request,
-        name="login.html",
-        context=template_ctx(request),
-    )
+    return render_template_response(request=request, name="login.html")
 
 
 @app.post("/login")
@@ -458,10 +472,10 @@ def login_action(
     if username == AUTH_USERNAME and password == AUTH_PASSWORD:
         request.session["auth_user"] = username
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse(
+    return render_template_response(
         request=request,
         name="login.html",
-        context=template_ctx(request, {"error": "Invalid username or password."}),
+        extra={"error": "Invalid username or password."},
         status_code=401,
     )
 
@@ -476,11 +490,7 @@ def logout(request: Request):
 def home(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse(
-        request=request,
-        name="index.html",
-        context=template_ctx(request),
-    )
+    return render_template_response(request=request, name="index.html")
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])

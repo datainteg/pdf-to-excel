@@ -11,7 +11,11 @@ You upload one or more PDF files from the browser, the app parses them, merges a
 - MongoDB-backed file storage for Excel/CSV downloads
 - Login authentication for UI and API routes
 
-Default web port: **8082**
+Default access:
+
+- `http://localhost` (via Dockerized Nginx)
+- `http://127.0.0.1:8082` (direct FastAPI, localhost only)
+- `https://<your-domain>` when SSL is issued
 
 ---
 
@@ -31,11 +35,17 @@ PDFtoWebsite/
   setup_ubuntu.sh            local Python environment setup
   docker-compose.yml
   Dockerfile
+  certbot/
+    conf/                    Let's Encrypt cert storage
+    www/                     ACME webroot challenge files
   deploy/
-    setup_ssl_certbot.sh     Nginx + Certbot SSL setup for subdomain
-    setup_pdf_datainteg_io.sh Nginx + Certbot setup for pdf.datainteg.io
+    setup_ssl_certbot.sh     wrapper: domain + SSL via setup.sh
+    setup_pdf_datainteg_io.sh wrapper: pdf.datainteg.io + SSL via setup.sh
     nginx/
-      pdf.datainteg.io.conf
+      templates/
+        http-only.conf
+        https-enabled.conf
+      runtime/
   output/
     jobs/<job_id>/...        generated files per request
 ```
@@ -51,7 +61,8 @@ chmod +x setup.sh
 
 After setup:
 
-- Open `http://localhost:8082`
+- Open `http://localhost`
+- Optional direct backend: `http://127.0.0.1:8082`
 - Login with:
   - Username: `datainteg`
   - Password: `Welcome@911`
@@ -106,7 +117,7 @@ Note: API endpoints require login session cookie from `/login`.
 
 ## Domain + Subdomain + SSL (Certbot)
 
-Run this on your Ubuntu server (with Docker app already running on port `8082`):
+Run this on your Ubuntu server:
 
 ```bash
 sudo bash deploy/setup_ssl_certbot.sh subdomain.yourdomain.com your-email@domain.com
@@ -114,9 +125,10 @@ sudo bash deploy/setup_ssl_certbot.sh subdomain.yourdomain.com your-email@domain
 
 What it does:
 
-1. Installs Nginx + Certbot
-2. Creates reverse proxy from `:80/:443` to `127.0.0.1:8082`
-3. Issues SSL certificate and enables HTTPS redirect
+1. Uses Dockerized Nginx (`80/443`) and FastAPI backend
+2. Stops/disables host non-Docker Nginx to avoid conflict
+3. Requests certificate using Certbot (webroot)
+4. Switches runtime Nginx config to HTTPS
 
 Important:
 
@@ -130,7 +142,16 @@ Use the domain-specific one-command script:
 sudo bash deploy/setup_pdf_datainteg_io.sh your-email@domain.com
 ```
 
-This installs Nginx, enables the `pdf.datainteg.io` virtual host, and issues SSL.
+This runs the same Dockerized flow with:
+
+- `APP_DOMAIN=pdf.datainteg.io`
+- your provided email for Let's Encrypt
+
+### Direct setup with environment variables
+
+```bash
+APP_DOMAIN=pdf.datainteg.io LETSENCRYPT_EMAIL=you@example.com bash setup.sh
+```
 
 ---
 

@@ -4,3 +4,11 @@ __pycache__/
 output/
 .pytest_cache/
 .mypy_cache/
+tmp_uvicorn_out.log
+tmp_uvicorn_err.log
+certbot/conf/*
+!certbot/conf/.gitkeep
+certbot/www/*
+!certbot/www/.gitkeep
+deploy/nginx/runtime/*
+!deploy/nginx/runtime/.gitkeep
