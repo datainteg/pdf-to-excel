@@ -97,14 +97,26 @@
         </header>
 
         <div class="downloads">
-          <a id="download-excel" class="btn-link" href="#" target="_blank" rel="noopener">Download Excel</a>
-          <a id="download-marathi" class="btn-link" href="#" target="_blank" rel="noopener">Download Marathi CSV</a>
-          <a id="download-english" class="btn-link" href="#" target="_blank" rel="noopener">Download English CSV</a>
+          <div class="download-group">
+            <span class="download-label">Original outputs:</span>
+            <a id="download-excel" class="btn-link" href="#" target="_blank" rel="noopener">Excel</a>
+            <a id="download-marathi" class="btn-link" href="#" target="_blank" rel="noopener">Marathi CSV</a>
+            <a id="download-english" class="btn-link" href="#" target="_blank" rel="noopener">English CSV</a>
+          </div>
+          <div class="download-group" id="live-export-group" style="display:none">
+            <span class="download-label">Live export (with corrections):</span>
+            <button type="button" class="btn-link" id="export-marathi-csv">Marathi CSV</button>
+            <button type="button" class="btn-link" id="export-english-csv">English CSV</button>
+            <button type="button" class="btn-link" id="export-marathi-excel">Marathi Excel</button>
+            <button type="button" class="btn-link" id="export-english-excel">English Excel</button>
+          </div>
         </div>
 
         <div class="tabs">
           <button type="button" class="tab active" data-sheet="marathi">Marathi Preview</button>
           <button type="button" class="tab" data-sheet="english">English Preview</button>
+          <button type="button" class="tab" data-sheet="marathi-live" id="tab-live-marathi" style="display:none">Marathi (Live)</button>
+          <button type="button" class="tab" data-sheet="english-live" id="tab-live-english" style="display:none">English (Live)</button>
         </div>
 
         <div class="table-wrap">
@@ -121,6 +133,46 @@
         </div>
       </section>
     </main>
+
+    <!-- Correction modal -->
+    <div id="correction-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Edit voter record">
+      <div class="modal-box">
+        <div class="modal-head">
+          <h3 class="modal-title">Edit Record</h3>
+          <button type="button" class="modal-close" id="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <form id="correction-form" class="modal-form">
+          <input type="hidden" id="edit-serial-no" />
+          <div class="modal-grid">
+            <label><span>Serial No</span><input id="edit-serial-display" type="text" disabled /></label>
+            <label><span>House No</span><input id="edit-house-no" name="house_no" type="text" /></label>
+            <label><span>Name (Marathi)</span><input id="edit-name" name="name" type="text" /></label>
+            <label><span>Relative Name</span><input id="edit-relative-name" name="relative_name" type="text" /></label>
+            <label><span>Relation Code</span>
+              <select id="edit-relation-code" name="relation_code">
+                <option value="">— unknown —</option>
+                <option value="व">व (Father)</option>
+                <option value="प">प (Husband)</option>
+              </select>
+            </label>
+            <label><span>Gender</span>
+              <select id="edit-gender" name="gender">
+                <option value="">— unknown —</option>
+                <option value="पुरुष">पुरुष (Male)</option>
+                <option value="महिला">महिला (Female)</option>
+              </select>
+            </label>
+            <label><span>Age</span><input id="edit-age" name="age" type="number" min="18" max="110" /></label>
+            <label><span>Voter ID</span><input id="edit-voter-id" name="voter_id" type="text" /></label>
+          </div>
+          <p id="correction-error" class="correction-error hidden"></p>
+          <div class="modal-actions">
+            <button type="button" id="modal-cancel" class="btn-secondary">Cancel</button>
+            <button type="submit" id="modal-save" class="btn-primary">Save Correction</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <script src="/static/app.js"></script>
   </body>

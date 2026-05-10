@@ -444,8 +444,21 @@ button:disabled,
 .downloads {
   margin: 14px 0;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.download-group {
+  display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: center;
+}
+
+.download-label {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 170px;
 }
 
 .btn-link {
@@ -523,6 +536,133 @@ tbody tr:nth-child(even) {
   margin: 12px 0 0;
   color: var(--error);
   font-size: 13px;
+}
+
+.edit-row-btn {
+  height: 26px;
+  font-size: 11px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid #cad9fc;
+  background: var(--accent-soft);
+  color: #1c4eb9;
+  cursor: pointer;
+}
+
+.edit-row-btn:hover {
+  background: #d6e5ff;
+}
+
+/* ── Correction modal ── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 18, 40, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-overlay.hidden {
+  display: none;
+}
+
+.modal-box {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  width: min(640px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px;
+  display: grid;
+  gap: 16px;
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.modal-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: var(--muted);
+}
+
+.modal-close:hover {
+  background: #f7f9fe;
+  color: var(--text);
+}
+
+.modal-form {
+  display: grid;
+  gap: 14px;
+}
+
+.modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.correction-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--error);
+}
+
+.correction-error.hidden {
+  display: none;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: #1f4ebe;
+  border-color: #1f4ebe;
+}
+
+.btn-secondary {
+  background: #fff;
+  color: var(--text);
+  border-color: var(--line);
+}
+
+@media (max-width: 520px) {
+  .modal-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @keyframes progressStripe {
