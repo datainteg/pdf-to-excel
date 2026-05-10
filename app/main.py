@@ -215,34 +215,72 @@ def write_job_meta(job_dir: Path, payload: Dict) -> None:
     )
 
 
+def make_artifact(file_key: str, label: str, download_url: str) -> Dict:
+    return {
+        "file_key": file_key,
+        "label": label,
+        "download_url": download_url,
+        "available": False,
+        "storage": "none",
+        "size_bytes": None,
+        "error": None,
+    }
+
+
+def exc_message(exc: Exception) -> str:
+    text = str(exc).strip()
+    if text:
+        return text[:500]
+    return exc.__class__.__name__
+
+
+def mark_artifact_from_disk(artifact: Dict, path: Path, default_error: str) -> None:
+    if path.exists():
+        artifact["available"] = True
+        artifact["storage"] = "disk"
+        artifact["size_bytes"] = int(path.stat().st_size)
+        artifact["error"] = None
+    elif not artifact.get("error"):
+        artifact["error"] = default_error
+
+
 def mongo_save_file(
     job_id: str,
     file_key: str,
     file_path: Path,
     content_type: str,
     download_name: str,
-) -> None:
+) -> Dict:
+    result = {"stored": False, "error": None}
     if not mongo_enabled():
-        return
+        result["error"] = "MongoDB not enabled."
+        return result
     if not file_path.exists():
-        return
+        result["error"] = "File not found on disk."
+        return result
 
-    data = file_path.read_bytes()
-    mongo_files.update_one(
-        {"job_id": job_id, "file_key": file_key},
-        {
-            "$set": {
-                "job_id": job_id,
-                "file_key": file_key,
-                "filename": download_name,
-                "content_type": content_type,
-                "data": Binary(data),
-                "size": len(data),
-                "updated_at": utc_now_iso(),
-            }
-        },
-        upsert=True,
-    )
+    try:
+        data = file_path.read_bytes()
+        mongo_files.update_one(
+            {"job_id": job_id, "file_key": file_key},
+            {
+                "$set": {
+                    "job_id": job_id,
+                    "file_key": file_key,
+                    "filename": download_name,
+                    "content_type": content_type,
+                    "data": Binary(data),
+                    "size": len(data),
+                    "updated_at": utc_now_iso(),
+                }
+            },
+            upsert=True,
+        )
+        result["stored"] = True
+        return result
+    except Exception as exc:
+        result["error"] = exc_message(exc)
+        return result
 
 
 def store_job_in_mongo(
@@ -250,37 +288,71 @@ def store_job_in_mongo(
     excel_path: Path,
     marathi_csv_path: Path,
     english_csv_path: Path,
-) -> None:
+) -> Dict:
+    result = {
+        "enabled": mongo_enabled(),
+        "job_saved": False,
+        "job_error": None,
+        "files": {
+            "excel": {"stored": False, "error": None},
+            "csv_marathi": {"stored": False, "error": None},
+            "csv_english": {"stored": False, "error": None},
+        },
+    }
+
     if not mongo_enabled():
-        return
+        return result
 
     job_id = payload["job_id"]
-    mongo_jobs.update_one(
-        {"job_id": job_id},
-        {"$set": payload},
-        upsert=True,
-    )
-    mongo_save_file(
+    try:
+        mongo_jobs.update_one(
+            {"job_id": job_id},
+            {"$set": payload},
+            upsert=True,
+        )
+        result["job_saved"] = True
+    except Exception as exc:
+        result["job_error"] = exc_message(exc)
+        return result
+
+    result["files"]["excel"] = mongo_save_file(
         job_id=job_id,
         file_key="excel",
         file_path=excel_path,
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         download_name=f"{job_id}_all_voters.xlsx",
     )
-    mongo_save_file(
+    result["files"]["csv_marathi"] = mongo_save_file(
         job_id=job_id,
         file_key="csv_marathi",
         file_path=marathi_csv_path,
         content_type="text/csv",
         download_name=f"{job_id}_all_voters_marathi.csv",
     )
-    mongo_save_file(
+    result["files"]["csv_english"] = mongo_save_file(
         job_id=job_id,
         file_key="csv_english",
         file_path=english_csv_path,
         content_type="text/csv",
         download_name=f"{job_id}_all_voters_english.csv",
     )
+    return result
+
+
+def artifact_output_status(artifacts: Dict[str, Dict]) -> str:
+    available = sum(1 for item in artifacts.values() if item.get("available"))
+    total = len(artifacts)
+    if total == 0:
+        return "completed"
+    if available == total:
+        return "completed"
+    if available > 0:
+        return "completed_with_warnings"
+    return "failed_outputs"
+
+
+def preview_block(columns: List[str], rows: List[Dict], truncated: bool) -> Dict:
+    return {"columns": columns, "rows": rows, "truncated": truncated}
 
 
 def mongo_find_job(job_id: str) -> Optional[Dict]:
@@ -411,17 +483,80 @@ def process_uploaded_pdfs(
         )
 
     excel_path = job_dir / "all_voters.xlsx"
-    print(f"[job {job_id}] writing outputs excel/csv ...")
-    run_batch.save_excel(all_records, excel_path)
-    run_batch.save_csv_files(all_records, csv_dir)
     marathi_csv_path = csv_dir / "all_voters_marathi.csv"
     english_csv_path = csv_dir / "all_voters_english.csv"
-    marathi_df, english_df = run_batch.build_output_frames(all_records)
+    artifacts = {
+        "excel": make_artifact(
+            file_key="excel",
+            label="Excel (Marathi + English)",
+            download_url=f"/api/jobs/{job_id}/download/excel",
+        ),
+        "csv_marathi": make_artifact(
+            file_key="csv_marathi",
+            label="Marathi CSV",
+            download_url=f"/api/jobs/{job_id}/download/csv/marathi",
+        ),
+        "csv_english": make_artifact(
+            file_key="csv_english",
+            label="English CSV",
+            download_url=f"/api/jobs/{job_id}/download/csv/english",
+        ),
+    }
+    warnings: List[str] = []
+
+    print(f"[job {job_id}] writing outputs excel/csv ...")
+    try:
+        run_batch.save_excel(all_records, excel_path)
+    except Exception as exc:
+        artifacts["excel"]["error"] = f"Excel generation failed: {exc_message(exc)}"
+    mark_artifact_from_disk(
+        artifact=artifacts["excel"],
+        path=excel_path,
+        default_error="Excel file was not created.",
+    )
+
+    csv_write_error = None
+    try:
+        run_batch.save_csv_files(all_records, csv_dir)
+    except Exception as exc:
+        csv_write_error = f"CSV generation failed: {exc_message(exc)}"
+
+    mark_artifact_from_disk(
+        artifact=artifacts["csv_marathi"],
+        path=marathi_csv_path,
+        default_error=csv_write_error or "Marathi CSV file was not created.",
+    )
+    mark_artifact_from_disk(
+        artifact=artifacts["csv_english"],
+        path=english_csv_path,
+        default_error=csv_write_error or "English CSV file was not created.",
+    )
 
     preview_limit = 100
+    preview_marathi = preview_block(columns=[], rows=[], truncated=False)
+    preview_english = preview_block(columns=[], rows=[], truncated=False)
+    try:
+        marathi_df, english_df = run_batch.build_output_frames(all_records)
+        preview_marathi = preview_block(
+            columns=list(marathi_df.columns),
+            rows=dataframe_rows(marathi_df, preview_limit),
+            truncated=len(marathi_df) > preview_limit,
+        )
+        preview_english = preview_block(
+            columns=list(english_df.columns),
+            rows=dataframe_rows(english_df, preview_limit),
+            truncated=len(english_df) > preview_limit,
+        )
+    except Exception as exc:
+        warnings.append(f"Preview build failed: {exc_message(exc)}")
+
+    for key, info in artifacts.items():
+        if info["error"]:
+            warnings.append(f"{key}: {info['error']}")
+
     payload = {
         "job_id": job_id,
-        "status": "completed",
+        "status": artifact_output_status(artifacts),
         "created_at": utc_now_iso(),
         "options": {
             "lang": ocr_lang,
@@ -440,31 +575,45 @@ def process_uploaded_pdfs(
             "download_marathi_csv_url": f"/api/jobs/{job_id}/download/csv/marathi",
             "download_english_csv_url": f"/api/jobs/{job_id}/download/csv/english",
             "preview_url": f"/api/jobs/{job_id}/preview",
+            "artifacts": artifacts,
+            "warnings": warnings,
         },
         "preview": {
-            "marathi": {
-                "columns": list(marathi_df.columns),
-                "rows": dataframe_rows(marathi_df, preview_limit),
-                "truncated": len(marathi_df) > preview_limit,
-            },
-            "english": {
-                "columns": list(english_df.columns),
-                "rows": dataframe_rows(english_df, preview_limit),
-                "truncated": len(english_df) > preview_limit,
-            },
+            "marathi": preview_marathi,
+            "english": preview_english,
         },
     }
     write_job_meta(job_dir, payload)
-    store_job_in_mongo(
+    mongo_store = store_job_in_mongo(
         payload=payload,
         excel_path=excel_path,
         marathi_csv_path=marathi_csv_path,
         english_csv_path=english_csv_path,
     )
+    if mongo_store.get("enabled"):
+        if mongo_store.get("job_error"):
+            warnings.append(f"mongo_meta: {mongo_store['job_error']}")
+        for file_key, mongo_result in mongo_store.get("files", {}).items():
+            artifact = artifacts.get(file_key)
+            if not artifact:
+                continue
+            if mongo_result.get("stored"):
+                artifact["storage"] = "disk+mongo" if artifact["available"] else "mongo"
+            elif mongo_result.get("error"):
+                warnings.append(f"mongo_{file_key}: {mongo_result['error']}")
+
+    payload["status"] = artifact_output_status(artifacts)
+    write_job_meta(job_dir, payload)
+    if mongo_store.get("enabled") and mongo_store.get("job_saved"):
+        try:
+            mongo_jobs.update_one({"job_id": job_id}, {"$set": payload})
+        except Exception as exc:
+            warnings.append(f"mongo_meta_refresh: {exc_message(exc)}")
+
     job_elapsed = time.time() - job_started
     print(
         f"[job {job_id}] completed total_records={len(all_records)} "
-        f"elapsed={job_elapsed:.1f}s"
+        f"status={payload['status']} elapsed={job_elapsed:.1f}s"
     )
     return payload
 
@@ -568,6 +717,7 @@ def get_preview(
     page_size: int = Query(25, ge=1, le=200),
 ):
     require_api_auth(request)
+    meta = read_job_meta(job_id)
     validate_job_id(job_id)
     sheet_key = sheet.lower()
     if sheet_key not in ALLOWED_SHEET:
@@ -575,6 +725,13 @@ def get_preview(
 
     filename = "all_voters_marathi.csv" if sheet_key == "marathi" else "all_voters_english.csv"
     file_key = "csv_marathi" if sheet_key == "marathi" else "csv_english"
+    artifacts = meta.get("output", {}).get("artifacts", {})
+    artifact = artifacts.get(file_key, {})
+    if artifact and not artifact.get("available"):
+        raise HTTPException(
+            status_code=404,
+            detail=artifact.get("error") or "Preview source CSV is not available.",
+        )
 
     mongo_doc = mongo_find_file(job_id=job_id, file_key=file_key)
     if mongo_doc is not None:
@@ -596,7 +753,14 @@ def get_preview(
 @app.get("/api/jobs/{job_id}/download/excel")
 def download_excel(job_id: str, request: Request):
     require_api_auth(request)
+    meta = read_job_meta(job_id)
     validate_job_id(job_id)
+    artifact = meta.get("output", {}).get("artifacts", {}).get("excel", {})
+    if artifact and not artifact.get("available"):
+        raise HTTPException(
+            status_code=404,
+            detail=artifact.get("error") or "Excel output is not available.",
+        )
     mongo_doc = mongo_find_file(job_id=job_id, file_key="excel")
     if mongo_doc is not None:
         return mongo_file_response(mongo_doc)
@@ -615,12 +779,19 @@ def download_excel(job_id: str, request: Request):
 @app.get("/api/jobs/{job_id}/download/csv/{sheet}")
 def download_csv(job_id: str, sheet: str, request: Request):
     require_api_auth(request)
+    meta = read_job_meta(job_id)
     validate_job_id(job_id)
     sheet_key = sheet.lower()
     if sheet_key not in ALLOWED_SHEET:
         raise HTTPException(status_code=400, detail="Invalid sheet. Use marathi or english.")
 
     file_key = "csv_marathi" if sheet_key == "marathi" else "csv_english"
+    artifact = meta.get("output", {}).get("artifacts", {}).get(file_key, {})
+    if artifact and not artifact.get("available"):
+        raise HTTPException(
+            status_code=404,
+            detail=artifact.get("error") or "CSV output is not available.",
+        )
     mongo_doc = mongo_find_file(job_id=job_id, file_key=file_key)
     if mongo_doc is not None:
         return mongo_file_response(mongo_doc)

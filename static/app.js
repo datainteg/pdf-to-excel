@@ -11,6 +11,8 @@ const progressStageEl = document.getElementById("progress-stage");
 const progressPercentEl = document.getElementById("progress-percent");
 const progressTrackEl = document.querySelector(".progress-track");
 const progressFillEl = document.getElementById("progress-fill");
+const artifactSummaryEl = document.getElementById("artifact-summary");
+const artifactListEl = document.getElementById("artifact-list");
 
 const downloadExcel = document.getElementById("download-excel");
 const downloadMarathi = document.getElementById("download-marathi");
@@ -165,6 +167,115 @@ function finishProgress(success, message) {
   setProgress(Math.max(state.progressValue, 12), message || "Processing failed.");
 }
 
+function formatBytes(sizeBytes) {
+  if (typeof sizeBytes !== "number" || Number.isNaN(sizeBytes) || sizeBytes < 0) {
+    return "";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let val = sizeBytes;
+  let unit = units[0];
+  for (let i = 0; i < units.length; i += 1) {
+    unit = units[i];
+    if (val < 1024 || i === units.length - 1) break;
+    val /= 1024;
+  }
+  return `${val >= 100 ? Math.round(val) : val.toFixed(val >= 10 ? 1 : 2)} ${unit}`;
+}
+
+function setDownloadLink(anchorEl, artifact, fallbackUrl) {
+  if (!anchorEl) return;
+  const available = artifact ? Boolean(artifact.available) : Boolean(fallbackUrl);
+  const url = (artifact && artifact.download_url) || fallbackUrl || "#";
+  if (available) {
+    anchorEl.href = url;
+    anchorEl.classList.remove("disabled");
+    anchorEl.removeAttribute("aria-disabled");
+    return;
+  }
+  anchorEl.href = "#";
+  anchorEl.classList.add("disabled");
+  anchorEl.setAttribute("aria-disabled", "true");
+}
+
+function renderArtifactSummary(artifacts, warnings) {
+  artifactListEl.innerHTML = "";
+  const entries = artifacts && typeof artifacts === "object" ? Object.values(artifacts) : [];
+
+  if (entries.length === 0 && (!warnings || warnings.length === 0)) {
+    artifactSummaryEl.classList.add("hidden");
+    return;
+  }
+
+  entries.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "artifact-item";
+
+    const main = document.createElement("div");
+    main.className = "artifact-main";
+
+    const label = document.createElement("div");
+    label.className = "artifact-label";
+    label.textContent = item.label || item.file_key || "Output";
+    main.appendChild(label);
+
+    const details = [];
+    if (item.storage) details.push(`Storage: ${item.storage}`);
+    if (item.size_bytes !== null && item.size_bytes !== undefined) {
+      const sizeText = formatBytes(item.size_bytes);
+      if (sizeText) details.push(`Size: ${sizeText}`);
+    }
+    if (!item.available && item.error) details.push(item.error);
+
+    const meta = document.createElement("div");
+    meta.className = `artifact-meta${!item.available && item.error ? " error" : ""}`;
+    meta.textContent = details.join(" | ") || (item.available ? "Ready to download." : "Not available.");
+    main.appendChild(meta);
+
+    const side = document.createElement("div");
+    side.style.display = "flex";
+    side.style.gap = "8px";
+    side.style.alignItems = "center";
+
+    const pill = document.createElement("span");
+    pill.className = `artifact-pill ${item.available ? "ok" : "fail"}`;
+    pill.textContent = item.available ? "Ready" : "Failed";
+    side.appendChild(pill);
+
+    const action = document.createElement(item.available ? "a" : "span");
+    action.className = `artifact-link${item.available ? "" : " disabled"}`;
+    action.textContent = item.available ? "Download" : "Unavailable";
+    if (item.available && item.download_url) {
+      action.href = item.download_url;
+      action.target = "_blank";
+      action.rel = "noopener";
+    }
+    side.appendChild(action);
+
+    row.appendChild(main);
+    row.appendChild(side);
+    artifactListEl.appendChild(row);
+  });
+
+  if (warnings && warnings.length) {
+    const warnRow = document.createElement("div");
+    warnRow.className = "artifact-item";
+    const warnMain = document.createElement("div");
+    warnMain.className = "artifact-main";
+    const warnLabel = document.createElement("div");
+    warnLabel.className = "artifact-label";
+    warnLabel.textContent = "Warnings";
+    const warnMeta = document.createElement("div");
+    warnMeta.className = "artifact-meta error";
+    warnMeta.textContent = warnings.join(" | ");
+    warnMain.appendChild(warnLabel);
+    warnMain.appendChild(warnMeta);
+    warnRow.appendChild(warnMain);
+    artifactListEl.appendChild(warnRow);
+  }
+
+  artifactSummaryEl.classList.remove("hidden");
+}
+
 fileInput.addEventListener("change", () => {
   if (!fileInput.files || fileInput.files.length === 0) {
     selectedFilesEl.textContent = "No files selected";
@@ -199,6 +310,8 @@ form.addEventListener("submit", async (event) => {
 
   setLoading(true);
   startProgress();
+  artifactSummaryEl.classList.add("hidden");
+  artifactListEl.innerHTML = "";
   setStatus("Processing PDFs. This can take a few minutes for large files.");
 
   try {
@@ -207,6 +320,8 @@ form.addEventListener("submit", async (event) => {
       body: formData,
     });
     const data = await readApiOrThrow(response, "Failed to process PDFs.");
+    const artifacts = data.output && data.output.artifacts ? data.output.artifacts : {};
+    const warnings = Array.isArray(data.output && data.output.warnings) ? data.output.warnings : [];
 
     state.jobId = data.job_id;
     state.activeSheet = "marathi";
@@ -215,16 +330,44 @@ form.addEventListener("submit", async (event) => {
     updatePagerButtons();
 
     summaryEl.textContent = `Files: ${data.input.total_files} | Parsed records: ${data.output.total_records}`;
-    downloadExcel.href = data.output.download_excel_url;
-    downloadMarathi.href = data.output.download_marathi_csv_url;
-    downloadEnglish.href = data.output.download_english_csv_url;
+    setDownloadLink(downloadExcel, artifacts.excel, data.output.download_excel_url);
+    setDownloadLink(downloadMarathi, artifacts.csv_marathi, data.output.download_marathi_csv_url);
+    setDownloadLink(downloadEnglish, artifacts.csv_english, data.output.download_english_csv_url);
+    renderArtifactSummary(artifacts, warnings);
     resultPanel.classList.remove("hidden");
 
-    activateTab("marathi");
-    await loadPreview(1);
+    const hasArtifactMap = Object.keys(artifacts).length > 0;
+    const marathiAvailable = !hasArtifactMap || (artifacts.csv_marathi && artifacts.csv_marathi.available);
+    const englishAvailable = !hasArtifactMap || (artifacts.csv_english && artifacts.csv_english.available);
 
-    finishProgress(true, "Completed.");
-    setStatus("Completed.");
+    if (marathiAvailable) {
+      activateTab("marathi");
+      await loadPreview(1);
+    } else if (englishAvailable) {
+      activateTab("english");
+      await loadPreview(1);
+    } else {
+      tableHead.innerHTML = "";
+      tableBody.innerHTML = "";
+      pageLabel.textContent = "Page 1 / 1";
+      updatePagerButtons();
+      setStatus("No preview available because CSV generation failed.", true);
+    }
+
+    const artifactEntries = Object.values(artifacts);
+    const anyArtifactReady =
+      artifactEntries.length === 0 || artifactEntries.some((item) => item && item.available);
+    if (!anyArtifactReady || data.status === "failed_outputs") {
+      finishProgress(false, "Output generation failed.");
+      const msg = warnings[0] || "Output generation failed. Please check server logs.";
+      setStatus(msg, true);
+    } else if (warnings.length || data.status === "completed_with_warnings") {
+      finishProgress(true, "Completed with warnings.");
+      setStatus(`Completed with warnings. ${warnings[0] || ""}`.trim(), false);
+    } else {
+      finishProgress(true, "Completed.");
+      setStatus("Completed.");
+    }
   } catch (error) {
     finishProgress(false, "Processing failed.");
     setStatus(error.message || "Request failed.", true);
