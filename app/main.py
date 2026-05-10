@@ -39,12 +39,27 @@ MAX_FILES_PER_JOB = 50
 ALLOWED_ACCURACY = {"fast", "balanced", "high"}
 ALLOWED_SHEET = {"marathi", "english"}
 
+
+def env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 MONGO_URI = os.getenv("MONGO_URI", "").strip()
 MONGO_DB_NAME = os.getenv("MONGO_DB", "pdf2excel")
-MONGO_TIMEOUT_MS = int(os.getenv("MONGO_TIMEOUT_MS", "5000"))
+MONGO_TIMEOUT_MS = env_int("MONGO_TIMEOUT_MS", 5000)
+MONGO_STORE_OUTPUT_FILES = os.getenv("MONGO_STORE_OUTPUT_FILES", "1").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 AUTH_USERNAME = os.getenv("APP_AUTH_USER", "datainteg")
 AUTH_PASSWORD = os.getenv("APP_AUTH_PASS", "Welcome@911")
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-this-session-secret")
+MAX_PREVIEW_ROWS = max(20, min(env_int("MAX_PREVIEW_ROWS", 100), 500))
 
 mongo_client = None
 mongo_db = None
@@ -315,6 +330,12 @@ def store_job_in_mongo(
         result["job_error"] = exc_message(exc)
         return result
 
+    if not MONGO_STORE_OUTPUT_FILES:
+        result["files"]["excel"]["error"] = "Mongo file storage disabled by config."
+        result["files"]["csv_marathi"]["error"] = "Mongo file storage disabled by config."
+        result["files"]["csv_english"]["error"] = "Mongo file storage disabled by config."
+        return result
+
     result["files"]["excel"] = mongo_save_file(
         job_id=job_id,
         file_key="excel",
@@ -394,6 +415,62 @@ def read_job_meta(job_id: str) -> Dict:
     if not meta_path.exists():
         raise HTTPException(status_code=404, detail="Job metadata not found.")
     return json.loads(meta_path.read_text(encoding="utf-8"))
+
+
+def job_summary(meta: Dict) -> Dict:
+    output = meta.get("output", {}) if isinstance(meta, dict) else {}
+    input_data = meta.get("input", {}) if isinstance(meta, dict) else {}
+    artifacts = output.get("artifacts", {}) if isinstance(output, dict) else {}
+    artifact_list = []
+    if isinstance(artifacts, dict):
+        for item in artifacts.values():
+            if isinstance(item, dict):
+                artifact_list.append(
+                    {
+                        "file_key": item.get("file_key"),
+                        "label": item.get("label"),
+                        "available": bool(item.get("available")),
+                        "download_url": item.get("download_url"),
+                    }
+                )
+
+    return {
+        "job_id": meta.get("job_id"),
+        "status": meta.get("status", "unknown"),
+        "created_at": meta.get("created_at"),
+        "total_files": int(input_data.get("total_files", 0) or 0),
+        "total_records": int(output.get("total_records", 0) or 0),
+        "artifacts": artifact_list,
+    }
+
+
+def list_recent_jobs(limit: int = 10) -> List[Dict]:
+    jobs: List[Dict] = []
+    limit = max(1, min(limit, 50))
+
+    if mongo_enabled():
+        try:
+            cursor = mongo_jobs.find({}, {"_id": 0}).sort("created_at", -1).limit(limit)
+            jobs = [job_summary(doc) for doc in cursor]
+            if jobs:
+                return jobs
+        except Exception as exc:
+            logger.warning("recent jobs from mongo failed: %s", exc_message(exc))
+
+    if not JOB_ROOT.exists():
+        return jobs
+
+    records: List[Dict] = []
+    for meta_path in JOB_ROOT.glob("*/job.json"):
+        try:
+            payload = json.loads(meta_path.read_text(encoding="utf-8"))
+            payload["_mtime"] = meta_path.stat().st_mtime
+            records.append(payload)
+        except Exception:
+            continue
+
+    records.sort(key=lambda item: item.get("_mtime", 0), reverse=True)
+    return [job_summary(item) for item in records[:limit]]
 
 
 def process_uploaded_pdfs(
@@ -505,38 +582,58 @@ def process_uploaded_pdfs(
     warnings: List[str] = []
 
     print(f"[job {job_id}] writing outputs excel/csv ...")
+    marathi_df: Optional[pd.DataFrame] = None
+    english_df: Optional[pd.DataFrame] = None
     try:
-        run_batch.save_excel(all_records, excel_path)
+        marathi_df, english_df = run_batch.build_output_frames(all_records)
     except Exception as exc:
-        artifacts["excel"]["error"] = f"Excel generation failed: {exc_message(exc)}"
+        frame_error = f"Output frame build failed: {exc_message(exc)}"
+        artifacts["excel"]["error"] = frame_error
+        artifacts["csv_marathi"]["error"] = frame_error
+        artifacts["csv_english"]["error"] = frame_error
+
+    if marathi_df is not None and english_df is not None:
+        try:
+            excel_path.parent.mkdir(parents=True, exist_ok=True)
+            with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+                marathi_df.to_excel(writer, sheet_name="Marathi", index=False)
+                english_df.to_excel(writer, sheet_name="English", index=False)
+        except Exception as exc:
+            artifacts["excel"]["error"] = f"Excel generation failed: {exc_message(exc)}"
+
+        try:
+            csv_dir.mkdir(parents=True, exist_ok=True)
+            marathi_df.to_csv(marathi_csv_path, index=False, encoding="utf-8-sig")
+        except Exception as exc:
+            artifacts["csv_marathi"]["error"] = f"Marathi CSV generation failed: {exc_message(exc)}"
+
+        try:
+            csv_dir.mkdir(parents=True, exist_ok=True)
+            english_df.to_csv(english_csv_path, index=False, encoding="utf-8-sig")
+        except Exception as exc:
+            artifacts["csv_english"]["error"] = f"English CSV generation failed: {exc_message(exc)}"
+
     mark_artifact_from_disk(
         artifact=artifacts["excel"],
         path=excel_path,
         default_error="Excel file was not created.",
     )
 
-    csv_write_error = None
-    try:
-        run_batch.save_csv_files(all_records, csv_dir)
-    except Exception as exc:
-        csv_write_error = f"CSV generation failed: {exc_message(exc)}"
-
     mark_artifact_from_disk(
         artifact=artifacts["csv_marathi"],
         path=marathi_csv_path,
-        default_error=csv_write_error or "Marathi CSV file was not created.",
+        default_error="Marathi CSV file was not created.",
     )
     mark_artifact_from_disk(
         artifact=artifacts["csv_english"],
         path=english_csv_path,
-        default_error=csv_write_error or "English CSV file was not created.",
+        default_error="English CSV file was not created.",
     )
 
-    preview_limit = 100
+    preview_limit = MAX_PREVIEW_ROWS
     preview_marathi = preview_block(columns=[], rows=[], truncated=False)
     preview_english = preview_block(columns=[], rows=[], truncated=False)
-    try:
-        marathi_df, english_df = run_batch.build_output_frames(all_records)
+    if marathi_df is not None and english_df is not None:
         preview_marathi = preview_block(
             columns=list(marathi_df.columns),
             rows=dataframe_rows(marathi_df, preview_limit),
@@ -547,8 +644,6 @@ def process_uploaded_pdfs(
             rows=dataframe_rows(english_df, preview_limit),
             truncated=len(english_df) > preview_limit,
         )
-    except Exception as exc:
-        warnings.append(f"Preview build failed: {exc_message(exc)}")
 
     for key, info in artifacts.items():
         if info["error"]:
@@ -700,6 +795,12 @@ def process(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Processing failed: {exc}") from exc
+
+
+@app.get("/api/jobs/recent")
+def get_recent_jobs(request: Request, limit: int = Query(8, ge=1, le=50)):
+    require_api_auth(request)
+    return {"jobs": list_recent_jobs(limit=limit)}
 
 
 @app.get("/api/jobs/{job_id}")

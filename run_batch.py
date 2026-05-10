@@ -356,13 +356,32 @@ def pdf_to_images(pdf_path: Path, dpi: int, max_pages: Optional[int]):
         return render_pdf_with_pdfium(pdf_path, dpi=dpi, max_pages=max_pages)
 
 
-def score_ocr_text(text: str) -> int:
+def score_ocr_text(text: str, deep: bool = False) -> int:
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     serial_hits = sum(1 for ln in lines if SERIAL_LINE_RE.match(ln))
     devanagari_chars = len(re.findall(r"[\u0900-\u097F]", text))
-    # Reuse parser as a quality signal: more valid records usually means better OCR.
-    parsed_hits = len(parse_voter_data(text, source_file="_ocr_score_", constants={}))
-    return (parsed_hits * 500) + (serial_hits * 25) + (devanagari_chars // 50)
+    voter_id_hits = len(re.findall(r"\b[A-Z]{2,3}[0-9]{6,10}\b", text))
+    field_marker_hits = len(
+        re.findall(
+            r"(\u0928\u093e\u0935|\u0932\u093f\u0902\u0917|\u0935\u092f|\u0935\u0921\u0940\u0932|\u092a\u0924\u0940|\u0918\u0930|Name|Age|Gender|Father|Husband|House)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+    score = (
+        (serial_hits * 35)
+        + (devanagari_chars // 40)
+        + (voter_id_hits * 45)
+        + (field_marker_hits * 8)
+    )
+
+    if deep:
+        # In high-accuracy mode, include parser quality as an additional signal.
+        parsed_hits = len(parse_voter_data(text, source_file="_ocr_score_", constants={}))
+        score += parsed_hits * 500
+
+    return score
 
 
 def extract_text(images, ocr_lang: str, accuracy_mode: str) -> str:
@@ -381,7 +400,7 @@ def extract_text(images, ocr_lang: str, accuracy_mode: str) -> str:
                 lang=ocr_lang,
                 config=build_ocr_config(psm),
             )
-            score = score_ocr_text(txt)
+            score = score_ocr_text(txt, deep=(accuracy_mode == "high"))
             if score > best_score:
                 best_score = score
                 best_text = txt

@@ -13,6 +13,8 @@ const progressTrackEl = document.querySelector(".progress-track");
 const progressFillEl = document.getElementById("progress-fill");
 const artifactSummaryEl = document.getElementById("artifact-summary");
 const artifactListEl = document.getElementById("artifact-list");
+const recentJobsListEl = document.getElementById("recent-jobs-list");
+const refreshJobsBtn = document.getElementById("refresh-jobs");
 
 const downloadExcel = document.getElementById("download-excel");
 const downloadMarathi = document.getElementById("download-marathi");
@@ -38,6 +40,7 @@ const state = {
 };
 
 updatePagerButtons();
+loadRecentJobs();
 
 async function parseApiResponse(response) {
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
@@ -276,6 +279,164 @@ function renderArtifactSummary(artifacts, warnings) {
   artifactSummaryEl.classList.remove("hidden");
 }
 
+function formatDateTime(isoValue) {
+  if (!isoValue) return "-";
+  const date = new Date(isoValue);
+  if (Number.isNaN(date.getTime())) return String(isoValue);
+  return date.toLocaleString();
+}
+
+function findArtifact(artifacts, key) {
+  const entries = Array.isArray(artifacts) ? artifacts : [];
+  return entries.find((item) => item && item.file_key === key) || null;
+}
+
+function statusBadgeClass(status) {
+  if (status === "completed" || status === "completed_with_warnings") return "ok";
+  return "fail";
+}
+
+function renderRecentJobs(jobs) {
+  if (!recentJobsListEl) return;
+  recentJobsListEl.innerHTML = "";
+
+  if (!Array.isArray(jobs) || jobs.length === 0) {
+    const empty = document.createElement("div");
+    empty.className = "recent-job-meta";
+    empty.textContent = "No jobs yet.";
+    recentJobsListEl.appendChild(empty);
+    return;
+  }
+
+  jobs.forEach((job) => {
+    const row = document.createElement("div");
+    row.className = "recent-job-item";
+
+    const main = document.createElement("div");
+    main.className = "recent-job-main";
+
+    const title = document.createElement("div");
+    title.className = "recent-job-title";
+    title.textContent = `Job ${job.job_id || "-"}`;
+    main.appendChild(title);
+
+    const meta = document.createElement("div");
+    meta.className = "recent-job-meta";
+    meta.textContent = `Created: ${formatDateTime(job.created_at)} | Files: ${job.total_files || 0} | Records: ${job.total_records || 0}`;
+    main.appendChild(meta);
+
+    const actions = document.createElement("div");
+    actions.className = "recent-job-actions";
+
+    const status = document.createElement("span");
+    status.className = `artifact-pill ${statusBadgeClass(job.status)}`;
+    status.textContent = job.status || "unknown";
+    actions.appendChild(status);
+
+    const openBtn = document.createElement("button");
+    openBtn.type = "button";
+    openBtn.className = "refresh-btn";
+    openBtn.textContent = "Open";
+    openBtn.disabled = !job.job_id;
+    openBtn.addEventListener("click", async () => {
+      if (!job.job_id) return;
+      await openJob(job.job_id);
+    });
+    actions.appendChild(openBtn);
+
+    const excelArtifact = findArtifact(job.artifacts, "excel");
+    const excelLink = document.createElement("a");
+    excelLink.className = `recent-job-link${excelArtifact && excelArtifact.available ? "" : " disabled"}`;
+    excelLink.textContent = "Excel";
+    excelLink.href = excelArtifact && excelArtifact.available ? excelArtifact.download_url : "#";
+    excelLink.target = "_blank";
+    excelLink.rel = "noopener";
+    actions.appendChild(excelLink);
+
+    row.appendChild(main);
+    row.appendChild(actions);
+    recentJobsListEl.appendChild(row);
+  });
+}
+
+async function loadRecentJobs() {
+  if (!recentJobsListEl) return;
+  try {
+    const response = await fetch("/api/jobs/recent?limit=8");
+    const data = await readApiOrThrow(response, "Failed to load recent jobs.");
+    renderRecentJobs(data.jobs || []);
+  } catch (_) {
+    // ignore on initial load or unauthenticated response
+  }
+}
+
+async function showJobResult(data) {
+  const output = data.output && typeof data.output === "object" ? data.output : {};
+  const input = data.input && typeof data.input === "object" ? data.input : {};
+  const artifacts = output.artifacts && typeof output.artifacts === "object" ? output.artifacts : {};
+  const warnings = Array.isArray(output.warnings) ? output.warnings : [];
+
+  state.jobId = data.job_id;
+  state.activeSheet = "marathi";
+  state.page = 1;
+  state.totalPages = 1;
+  updatePagerButtons();
+
+  summaryEl.textContent = `Files: ${input.total_files || 0} | Parsed records: ${output.total_records || 0}`;
+  setDownloadLink(downloadExcel, artifacts.excel, output.download_excel_url);
+  setDownloadLink(downloadMarathi, artifacts.csv_marathi, output.download_marathi_csv_url);
+  setDownloadLink(downloadEnglish, artifacts.csv_english, output.download_english_csv_url);
+  renderArtifactSummary(artifacts, warnings);
+  resultPanel.classList.remove("hidden");
+
+  const hasArtifactMap = Object.keys(artifacts).length > 0;
+  const marathiAvailable = !hasArtifactMap || (artifacts.csv_marathi && artifacts.csv_marathi.available);
+  const englishAvailable = !hasArtifactMap || (artifacts.csv_english && artifacts.csv_english.available);
+
+  if (marathiAvailable) {
+    activateTab("marathi");
+    await loadPreview(1);
+  } else if (englishAvailable) {
+    activateTab("english");
+    await loadPreview(1);
+  } else {
+    tableHead.innerHTML = "";
+    tableBody.innerHTML = "";
+    pageLabel.textContent = "Page 1 / 1";
+    updatePagerButtons();
+    setStatus("No preview available because CSV generation failed.", true);
+  }
+
+  const artifactEntries = Object.values(artifacts);
+  const anyArtifactReady =
+    artifactEntries.length === 0 || artifactEntries.some((item) => item && item.available);
+  if (!anyArtifactReady || data.status === "failed_outputs") {
+    finishProgress(false, "Output generation failed.");
+    const msg = warnings[0] || "Output generation failed. Please check server logs.";
+    setStatus(msg, true);
+  } else if (warnings.length || data.status === "completed_with_warnings") {
+    finishProgress(true, "Completed with warnings.");
+    setStatus(`Completed with warnings. ${warnings[0] || ""}`.trim(), false);
+  } else {
+    finishProgress(true, "Completed.");
+    setStatus("Completed.");
+  }
+}
+
+async function openJob(jobId) {
+  setStatus(`Loading job ${jobId} ...`);
+  try {
+    const response = await fetch(`/api/jobs/${jobId}`);
+    const data = await readApiOrThrow(response, "Failed to load job.");
+    startProgress();
+    await showJobResult(data);
+  } catch (error) {
+    setStatus(error.message || "Could not load job.", true);
+  } finally {
+    setLoading(false);
+  }
+}
+
 fileInput.addEventListener("change", () => {
   if (!fileInput.files || fileInput.files.length === 0) {
     selectedFilesEl.textContent = "No files selected";
@@ -320,54 +481,8 @@ form.addEventListener("submit", async (event) => {
       body: formData,
     });
     const data = await readApiOrThrow(response, "Failed to process PDFs.");
-    const artifacts = data.output && data.output.artifacts ? data.output.artifacts : {};
-    const warnings = Array.isArray(data.output && data.output.warnings) ? data.output.warnings : [];
-
-    state.jobId = data.job_id;
-    state.activeSheet = "marathi";
-    state.page = 1;
-    state.totalPages = 1;
-    updatePagerButtons();
-
-    summaryEl.textContent = `Files: ${data.input.total_files} | Parsed records: ${data.output.total_records}`;
-    setDownloadLink(downloadExcel, artifacts.excel, data.output.download_excel_url);
-    setDownloadLink(downloadMarathi, artifacts.csv_marathi, data.output.download_marathi_csv_url);
-    setDownloadLink(downloadEnglish, artifacts.csv_english, data.output.download_english_csv_url);
-    renderArtifactSummary(artifacts, warnings);
-    resultPanel.classList.remove("hidden");
-
-    const hasArtifactMap = Object.keys(artifacts).length > 0;
-    const marathiAvailable = !hasArtifactMap || (artifacts.csv_marathi && artifacts.csv_marathi.available);
-    const englishAvailable = !hasArtifactMap || (artifacts.csv_english && artifacts.csv_english.available);
-
-    if (marathiAvailable) {
-      activateTab("marathi");
-      await loadPreview(1);
-    } else if (englishAvailable) {
-      activateTab("english");
-      await loadPreview(1);
-    } else {
-      tableHead.innerHTML = "";
-      tableBody.innerHTML = "";
-      pageLabel.textContent = "Page 1 / 1";
-      updatePagerButtons();
-      setStatus("No preview available because CSV generation failed.", true);
-    }
-
-    const artifactEntries = Object.values(artifacts);
-    const anyArtifactReady =
-      artifactEntries.length === 0 || artifactEntries.some((item) => item && item.available);
-    if (!anyArtifactReady || data.status === "failed_outputs") {
-      finishProgress(false, "Output generation failed.");
-      const msg = warnings[0] || "Output generation failed. Please check server logs.";
-      setStatus(msg, true);
-    } else if (warnings.length || data.status === "completed_with_warnings") {
-      finishProgress(true, "Completed with warnings.");
-      setStatus(`Completed with warnings. ${warnings[0] || ""}`.trim(), false);
-    } else {
-      finishProgress(true, "Completed.");
-      setStatus("Completed.");
-    }
+    await showJobResult(data);
+    await loadRecentJobs();
   } catch (error) {
     finishProgress(false, "Processing failed.");
     setStatus(error.message || "Request failed.", true);
@@ -385,6 +500,17 @@ tabs.forEach((tab) => {
     await loadPreview(1);
   });
 });
+
+if (refreshJobsBtn) {
+  refreshJobsBtn.addEventListener("click", async () => {
+    refreshJobsBtn.disabled = true;
+    try {
+      await loadRecentJobs();
+    } finally {
+      refreshJobsBtn.disabled = false;
+    }
+  });
+}
 
 prevBtn.addEventListener("click", async () => {
   if (!state.jobId || state.page <= 1) return;

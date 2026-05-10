@@ -59,6 +59,25 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
+Fresh clone + clean deploy (useful after prune/reset):
+
+```bash
+chmod +x setup_fresh_clone.sh
+TARGET_DIR=$HOME/pdf-to-excel-clean ./setup_fresh_clone.sh
+```
+
+Fresh clone with domain + SSL in one command:
+
+```bash
+TARGET_DIR=$HOME/pdf-to-excel-clean APP_DOMAIN=pdf.datainteg.io LETSENCRYPT_EMAIL=you@example.com ./setup_fresh_clone.sh
+```
+
+If repo folder already exists and you want to force hard-sync it to `origin/main`:
+
+```bash
+TARGET_DIR=$HOME/pdf-to-excel-clean FORCE_SYNC=1 ./setup_fresh_clone.sh
+```
+
 Quick restart on server:
 
 ```bash
@@ -118,6 +137,7 @@ Open `http://localhost:8082`
 - `POST /logout` logout action
 - `GET /health` health check
 - `POST /api/process` upload + process PDFs
+- `GET /api/jobs/recent?limit=8` recent job list for UI/history
 - `GET /api/jobs/{job_id}` job metadata
 - `GET /api/jobs/{job_id}/preview?sheet=marathi|english&page=1&page_size=25`
 - `GET /api/jobs/{job_id}/download/excel`
@@ -173,7 +193,12 @@ APP_DOMAIN=pdf.datainteg.io LETSENCRYPT_EMAIL=you@example.com bash setup.sh
 - OCR languages expected: `mar` and `eng`
 - Uploads are processed per job and saved under `output/jobs/<job_id>/`
 - Job metadata and generated files are also stored in MongoDB (`pdf2excel` DB) when `MONGO_URI` is set
+- Output file binary storage in MongoDB can be toggled:
+  - `MONGO_STORE_OUTPUT_FILES=1` (default, store files in Mongo)
+  - `MONGO_STORE_OUTPUT_FILES=0` (store metadata in Mongo, files only on disk)
 - The parser supports `--accuracy-mode` (`fast`, `balanced`, `high`) in both CLI and API workflows
+- Preview rows in `/api/jobs/{job_id}` are controlled by:
+  - `MAX_PREVIEW_ROWS` (default `100`, range `20..500`)
 - Auth credentials can be overridden by env vars:
   - `APP_AUTH_USER` (default: `datainteg`)
   - `APP_AUTH_PASS` (default: `Welcome@911`)
