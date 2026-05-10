@@ -22,12 +22,19 @@ echo "[1/3] Building and starting containers..."
 
 echo "[2/3] Waiting for service health..."
 if command -v curl >/dev/null 2>&1; then
+  health_ok=0
   for _ in $(seq 1 30); do
     if curl -fsS http://localhost:8082/health >/dev/null 2>&1; then
+      health_ok=1
       break
     fi
     sleep 2
   done
+  if [[ "${health_ok}" -ne 1 ]]; then
+    echo "ERROR: Web service did not become healthy on port 8082."
+    echo "Run: docker compose logs -f pdf2excel-web"
+    exit 1
+  fi
 fi
 
 echo "[3/3] Ready."
