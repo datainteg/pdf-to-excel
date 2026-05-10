@@ -466,7 +466,7 @@ def home(request: Request):
     return templates.TemplateResponse("index.html", template_ctx(request))
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health() -> Dict[str, str]:
     return {"status": "ok", "mongo": "enabled" if mongo_enabled() else "disabled"}
 
