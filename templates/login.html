@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - PDF to Excel OCR</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="layout login-layout">
+      <section class="panel login-panel">
+        <header class="panel-head">
+          <h1>Login</h1>
+          <p>Enter your credentials to access the converter.</p>
+        </header>
+
+        {% if error %}
+        <p class="error-text">{{ error }}</p>
+        {% endif %}
+
+        <form class="form" method="post" action="/login">
+          <label>
+            <span>Username</span>
+            <input name="username" type="text" autocomplete="username" required />
+          </label>
+
+          <label>
+            <span>Password</span>
+            <input name="password" type="password" autocomplete="current-password" required />
+          </label>
+
+          <button id="submit-btn" type="submit">Sign In</button>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

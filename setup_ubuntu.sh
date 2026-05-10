@@ -10,6 +10,7 @@ sudo apt install -y \
   python3-pip \
   python3-venv \
   tesseract-ocr \
+  tesseract-ocr-eng \
   tesseract-ocr-mar \
   poppler-utils
 
@@ -19,18 +20,12 @@ source .venv/bin/activate
 
 echo "[4/4] Installing Python dependencies..."
 python -m pip install --upgrade pip
-python -m pip install \
-  pytesseract \
-  pdf2image \
-  opencv-python \
-  pymongo \
-  pandas \
-  openpyxl \
-  pypdfium2
+python -m pip install -r requirements.txt
 
 echo ""
 echo "Setup complete."
 echo "Next:"
-echo "  1) Put PDFs in ./pdfs"
-echo "  2) source .venv/bin/activate"
-echo "  3) python run_batch.py --input-dir pdfs --excel output/all_voters.xlsx"
+echo "  1) source .venv/bin/activate"
+echo "  2) Start web app: uvicorn app.main:app --host 0.0.0.0 --port 8082"
+echo "  3) Open: http://localhost:8082"
+echo "  4) CLI mode (optional): python run_batch.py --input-dir pdfs --output-format both --accuracy-mode balanced"

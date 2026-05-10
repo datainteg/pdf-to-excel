@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PDF to Excel OCR</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <main class="layout">
+      <section class="panel">
+        <div class="topbar">
+          <span class="signed-in">Signed in: {{ auth_user }}</span>
+          <form action="/logout" method="post">
+            <button type="submit" class="logout-btn">Logout</button>
+          </form>
+        </div>
+
+        <header class="panel-head">
+          <h1>PDF to Excel Converter</h1>
+          <p>Upload Marathi/English voter PDFs and merge into a single Excel output.</p>
+        </header>
+
+        <form id="process-form" class="form" enctype="multipart/form-data">
+          <label class="dropzone" for="files">
+            <input id="files" name="files" type="file" accept=".pdf,application/pdf" multiple required />
+            <span class="dropzone-title">Select PDF Files</span>
+            <span class="dropzone-subtitle" id="selected-files">No files selected</span>
+          </label>
+
+          <div class="grid">
+            <label>
+              <span>OCR Language</span>
+              <select id="lang" name="lang">
+                <option value="mar+eng" selected>Marathi + English</option>
+                <option value="mar">Marathi Only</option>
+                <option value="eng">English Only</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Accuracy Mode</span>
+              <select id="accuracy_mode" name="accuracy_mode">
+                <option value="balanced" selected>Balanced</option>
+                <option value="high">High</option>
+                <option value="fast">Fast</option>
+              </select>
+            </label>
+
+            <label>
+              <span>DPI</span>
+              <input id="dpi" name="dpi" type="number" min="120" max="600" value="300" />
+            </label>
+
+            <label>
+              <span>Max Pages (optional)</span>
+              <input id="max_pages" name="max_pages" type="number" min="1" placeholder="All pages" />
+            </label>
+          </div>
+
+          <button id="submit-btn" type="submit">Convert PDFs</button>
+          <p id="status" class="status">Ready</p>
+        </form>
+      </section>
+
+      <section id="result-panel" class="panel hidden">
+        <header class="panel-head">
+          <h2>Results</h2>
+          <p id="summary"></p>
+        </header>
+
+        <div class="downloads">
+          <a id="download-excel" class="btn-link" href="#" target="_blank" rel="noopener">Download Excel</a>
+          <a id="download-marathi" class="btn-link" href="#" target="_blank" rel="noopener">Download Marathi CSV</a>
+          <a id="download-english" class="btn-link" href="#" target="_blank" rel="noopener">Download English CSV</a>
+        </div>
+
+        <div class="tabs">
+          <button type="button" class="tab active" data-sheet="marathi">Marathi Preview</button>
+          <button type="button" class="tab" data-sheet="english">English Preview</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="preview-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="pager">
+          <button id="prev-page" type="button">Previous</button>
+          <span id="page-label">Page 1 / 1</span>
+          <button id="next-page" type="button">Next</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

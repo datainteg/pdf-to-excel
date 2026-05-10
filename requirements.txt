@@ -1,0 +1,12 @@
+pytesseract
+pdf2image
+opencv-python-headless
+numpy
+pandas
+openpyxl
+pypdfium2
+pymongo
+fastapi
+uvicorn[standard]
+python-multipart
+jinja2

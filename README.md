@@ -1,116 +1,146 @@
-# PDF to Excel/Mongo (Ubuntu Batch)
+# PDF to Excel Web App (FastAPI)
 
-This project converts many voter-list PDFs into:
-- one combined Excel file
-- optional MongoDB documents
-- raw OCR text files for debugging
+FastAPI-based web app for Marathi/English voter-list PDF OCR.
 
-## Visual Flow
+You upload one or more PDF files from the browser, the app parses them, merges all records into one result set, and gives:
 
-```text
-pdfs/*.pdf
-   |
-   v
-PDF page render (pdf2image or pypdfium2)
-   |
-   v
-Image preprocess (OpenCV: grayscale + threshold)
-   |
-   v
-OCR (Tesseract: mar+eng)
-   |
-   v
-Regex parsing -> structured voter records
-   |                     |
-   |                     +--> output/raw_text/<pdf_name>.txt
-   v
-output/all_voters.xlsx
-   |
-   +--> optional MongoDB upsert
-```
+- One combined Excel file (`Marathi` + `English` sheets)
+- Marathi CSV
+- English CSV
+- In-browser preview with pagination
+- MongoDB-backed file storage for Excel/CSV downloads
+- Login authentication for UI and API routes
 
-## Folder Structure
+Default web port: **8082**
+
+---
+
+## Project Structure
 
 ```text
 PDFtoWebsite/
-├── pdfs/                  # Put all input PDF files here
-├── output/
-│   └── raw_text/          # OCR text dump per PDF
-├── setup_ubuntu.sh        # One-time Ubuntu setup
-├── run_batch.py           # Main batch runner
-├── pdfToMongo.py          # Existing single-file runner (kept)
-└── README.md
+  app/
+    main.py                  FastAPI backend
+  templates/
+    index.html               UI page
+  static/
+    app.css                  UI styles
+    app.js                   UI logic
+  run_batch.py               OCR + parsing engine (reused by web API)
+  setup.sh                   one-click Docker startup
+  setup_ubuntu.sh            local Python environment setup
+  docker-compose.yml
+  Dockerfile
+  deploy/
+    setup_ssl_certbot.sh     Nginx + Certbot SSL setup for subdomain
+    setup_pdf_datainteg_io.sh Nginx + Certbot setup for pdf.datainteg.io
+    nginx/
+      pdf.datainteg.io.conf
+  output/
+    jobs/<job_id>/...        generated files per request
 ```
 
-## 1) Ubuntu Initial Setup
+---
 
-Run once:
+## One-Click Docker Setup (Recommended)
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+After setup:
+
+- Open `http://localhost:8082`
+- Login with:
+  - Username: `datainteg`
+  - Password: `Welcome@911`
+- Upload PDFs
+- Download merged Excel/CSV outputs
+- MongoDB is available at `mongodb://localhost:27017`
+
+Manual Docker command:
+
+```bash
+docker compose up --build -d
+```
+
+Stop:
+
+```bash
+docker compose down
+```
+
+---
+
+## Local Python Setup (without Docker)
 
 ```bash
 chmod +x setup_ubuntu.sh
 ./setup_ubuntu.sh
-```
-
-## 2) Add Your PDFs
-
-Copy all PDFs into `pdfs/`.
-
-Example:
-
-```bash
-cp /path/to/your/*.pdf ./pdfs/
-```
-
-## 3) Run Batch Conversion
-
-Activate env:
-
-```bash
 source .venv/bin/activate
+uvicorn app.main:app --host 0.0.0.0 --port 8082
 ```
 
-Quick test (fast):
+Open `http://localhost:8082`
+
+---
+
+## API Endpoints
+
+- `GET /` UI
+- `GET /login` login page
+- `POST /login` login action
+- `POST /logout` logout action
+- `GET /health` health check
+- `POST /api/process` upload + process PDFs
+- `GET /api/jobs/{job_id}` job metadata
+- `GET /api/jobs/{job_id}/preview?sheet=marathi|english&page=1&page_size=25`
+- `GET /api/jobs/{job_id}/download/excel`
+- `GET /api/jobs/{job_id}/download/csv/marathi`
+- `GET /api/jobs/{job_id}/download/csv/english`
+
+Note: API endpoints require login session cookie from `/login`.
+
+---
+
+## Domain + Subdomain + SSL (Certbot)
+
+Run this on your Ubuntu server (with Docker app already running on port `8082`):
 
 ```bash
-python run_batch.py --input-dir pdfs --excel output/all_voters.xlsx --max-pages 3 --dpi 180
+sudo bash deploy/setup_ssl_certbot.sh subdomain.yourdomain.com your-email@domain.com
 ```
 
-Full run:
+What it does:
+
+1. Installs Nginx + Certbot
+2. Creates reverse proxy from `:80/:443` to `127.0.0.1:8082`
+3. Issues SSL certificate and enables HTTPS redirect
+
+Important:
+
+- DNS `A` record of your subdomain must point to your server IP before running Certbot.
+
+### Direct setup for `pdf.datainteg.io`
+
+Use the domain-specific one-command script:
 
 ```bash
-python run_batch.py --input-dir pdfs --excel output/all_voters.xlsx
+sudo bash deploy/setup_pdf_datainteg_io.sh your-email@domain.com
 ```
 
-## 4) Optional MongoDB Save
+This installs Nginx, enables the `pdf.datainteg.io` virtual host, and issues SSL.
 
-If MongoDB is running:
+---
 
-```bash
-python run_batch.py \
-  --input-dir pdfs \
-  --excel output/all_voters.xlsx \
-  --mongo-uri "mongodb://localhost:27017/" \
-  --mongo-db voter_db \
-  --mongo-collection voters
-```
+## Notes
 
-## Outputs
-
-- Combined Excel: `output/all_voters.xlsx`
-- Raw OCR text: `output/raw_text/<pdfname>.txt`
-- MongoDB records (optional): `voter_db.voters`
-
-## Performance Notes
-
-- Start with `--max-pages 3` to validate pipeline quickly.
-- Use `--dpi 150` or `--dpi 180` for faster throughput.
-- `mar+eng` is slower than `eng` only, but needed for Marathi PDFs.
-
-## Troubleshooting
-
-- If OCR language error appears:
-  - install Marathi pack: `sudo apt install tesseract-ocr-mar`
-- If Poppler missing:
-  - install: `sudo apt install poppler-utils`
-- If no rows parsed:
-  - check corresponding `output/raw_text/*.txt` and adjust parser regex.
+- OCR languages expected: `mar` and `eng`
+- Uploads are processed per job and saved under `output/jobs/<job_id>/`
+- Job metadata and generated files are also stored in MongoDB (`pdf2excel` DB) when `MONGO_URI` is set
+- The parser supports `--accuracy-mode` (`fast`, `balanced`, `high`) in both CLI and API workflows
+- Auth credentials can be overridden by env vars:
+  - `APP_AUTH_USER` (default: `datainteg`)
+  - `APP_AUTH_PASS` (default: `Welcome@911`)
+  - `SESSION_SECRET` (recommended to set a strong value in production)
