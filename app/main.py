@@ -70,6 +70,13 @@ def ensure_dirs() -> None:
     JOB_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+def ensure_required_templates() -> None:
+    required = ("login.html", "index.html")
+    missing = [name for name in required if not (BASE_DIR / "templates" / name).exists()]
+    if missing:
+        raise RuntimeError(f"Missing template files: {', '.join(missing)}")
+
+
 def is_authenticated(request: Request) -> bool:
     return request.session.get("auth_user") == AUTH_USERNAME
 
@@ -425,6 +432,7 @@ def process_uploaded_pdfs(
 @app.on_event("startup")
 def on_startup() -> None:
     ensure_dirs()
+    ensure_required_templates()
     run_batch.configure_tesseract()
     run_batch.configure_tessdata_prefix()
     init_mongo()
@@ -434,7 +442,11 @@ def on_startup() -> None:
 def login_page(request: Request):
     if is_authenticated(request):
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("login.html", template_ctx(request))
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context=template_ctx(request),
+    )
 
 
 @app.post("/login")
@@ -447,8 +459,9 @@ def login_action(
         request.session["auth_user"] = username
         return RedirectResponse(url="/", status_code=303)
     return templates.TemplateResponse(
-        "login.html",
-        template_ctx(request, {"error": "Invalid username or password."}),
+        request=request,
+        name="login.html",
+        context=template_ctx(request, {"error": "Invalid username or password."}),
         status_code=401,
     )
 
@@ -463,7 +476,11 @@ def logout(request: Request):
 def home(request: Request):
     if not is_authenticated(request):
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("index.html", template_ctx(request))
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context=template_ctx(request),
+    )
 
 
 @app.api_route("/health", methods=["GET", "HEAD"])
